@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { openai } from '@ai-sdk/openai';
+import { generateObject } from 'ai';
 
 export interface EventQueryAnalysis {
   isEventQuery: boolean;
@@ -35,8 +37,29 @@ export interface LocationInfo {
  * Detect if a user query is asking for events/activities
  */
 export async function isEventQuery(message: string): Promise<boolean> {
-  // Use keyword-based detection for now to avoid AI SDK issues
-  return fallbackEventDetection(message);
+  try {
+    const result = await generateObject({
+      model: openai('gpt-4o-mini'),
+      schema: z.object({
+        isEventQuery: z.boolean(),
+        confidence: z.number().min(0).max(1),
+      }),
+      prompt: `Analyze if this user message is asking for events, activities, places to go, or things to do:
+      
+      Message: "${message}"
+      
+      Return JSON with:
+      - isEventQuery: true if asking about events/activities/places/things to do
+      - confidence: 0-1 confidence score
+      
+      Be generous in interpretation - include queries about bars, restaurants, clubs, activities, sightseeing, etc.`,
+    });
+    
+    return result.object.isEventQuery && result.object.confidence > 0.6;
+  } catch (error) {
+    console.error('AI event detection failed:', error);
+    return fallbackEventDetection(message);
+  }
 }
 
 /**
@@ -45,8 +68,33 @@ export async function isEventQuery(message: string): Promise<boolean> {
 export async function extractLocationFromQuery(
   message: string,
 ): Promise<string | null> {
-  // Use keyword-based extraction for now
-  return fallbackLocationExtraction(message);
+  try {
+    const result = await generateObject({
+      model: openai('gpt-4o-mini'),
+      schema: z.object({
+        location: z.string().nullable(),
+        confidence: z.number().min(0).max(1),
+      }),
+      prompt: `Extract the location mentioned in this query:
+      
+      Query: "${message}"
+      
+      Return JSON with:
+      - location: the city, country, or area mentioned (null if none)
+      - confidence: 0-1 confidence score
+      
+      Examples:
+      - "bars in london" → "london"
+      - "clubs in barcelona" → "barcelona"
+      - "things to do in tokyo" → "tokyo"
+      - "student life" → null`,
+    });
+    
+    return result.object.confidence > 0.7 ? result.object.location : null;
+  } catch (error) {
+    console.error('AI location extraction failed:', error);
+    return fallbackLocationExtraction(message);
+  }
 }
 
 /**
@@ -55,16 +103,68 @@ export async function extractLocationFromQuery(
 export async function categorizeEventQuery(
   message: string,
 ): Promise<EventCategory | null> {
-  // Use keyword-based categorization for now
-  return fallbackEventCategorization(message);
+  try {
+    const result = await generateObject({
+      model: openai('gpt-4o-mini'),
+      schema: z.object({
+        eventType: z.enum(['social', 'academic', 'cultural', 'sports', 'nightlife', 'food', 'entertainment', 'outdoor', 'workshop', 'networking']).nullable(),
+        confidence: z.number().min(0).max(1),
+      }),
+      prompt: `Categorize the type of event/activity being requested:
+      
+      Query: "${message}"
+      
+      Categories:
+      - social: parties, meetups, social gatherings
+      - academic: workshops, seminars, lectures
+      - cultural: museums, art, cultural events
+      - sports: fitness, sports activities
+      - nightlife: bars, clubs, nightlife
+      - food: restaurants, dining, food events
+      - entertainment: concerts, shows, performances
+      - outdoor: hiking, parks, nature activities
+      - workshop: skill-building, DIY, hands-on
+      - networking: professional, business events
+      
+      Return JSON with:
+      - eventType: the most appropriate category (null if unclear)
+      - confidence: 0-1 confidence score`,
+    });
+    
+    return result.object.confidence > 0.6 ? result.object.eventType : null;
+  } catch (error) {
+    console.error('AI event categorization failed:', error);
+    return fallbackEventCategorization(message);
+  }
 }
 
 /**
  * Extract relevant keywords for event discovery
  */
 export async function extractEventKeywords(message: string): Promise<string[]> {
-  // Use keyword-based extraction for now
-  return fallbackKeywordExtraction(message);
+  try {
+    const result = await generateObject({
+      model: openai('gpt-4o-mini'),
+      schema: z.object({
+        keywords: z.array(z.string()),
+        searchTerms: z.array(z.string()),
+      }),
+      prompt: `Extract relevant keywords and search terms for finding events/activities from this query:
+      
+      Query: "${message}"
+      
+      Return JSON with:
+      - keywords: specific terms mentioned (bars, clubs, restaurants, etc.)
+      - searchTerms: broader terms useful for social media searching
+      
+      Focus on actionable terms that would help find relevant social media posts.`,
+    });
+    
+    return [...result.object.keywords, ...result.object.searchTerms];
+  } catch (error) {
+    console.error('AI keyword extraction failed:', error);
+    return fallbackKeywordExtraction(message);
+  }
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   analyzeScrapedEvents,
   generateEventResponse,
 } from '@/lib/ai/eventPipeline';
+import { MultiPlatformScraper } from '@/lib/services/multiPlatformScraper';
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,162 +33,82 @@ export async function POST(request: NextRequest) {
       `Processing event query: "${query}" for user ${session.user.id}`,
     );
 
-    // Step 1: Analyze the query to determine if it's event-related
-    const analysis = await analyzeEventQuery(query);
+    // Step 1: Use enhanced AI analysis for query processing
+    const queryAnalysis = await analyzeUserQuery(query);
+    
+    if (!queryAnalysis.isEventSearch) {
+      return NextResponse.json({
+        success: false,
+        message: 'This query doesn\'t appear to be asking for events or activities.',
+        suggestion: 'Try asking about places to go, things to do, or activities in a specific location.',
+      });
+    }
 
-    if (!analysis.isEventQuery) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Query does not appear to be event-related',
-          analysis,
-          message:
-            'Try asking about events, activities, places to go, or things to do in a specific location.',
-        },
-        { status: 200 },
+    console.log('🔍 Query analysis completed:', queryAnalysis);
+
+    // Step 2: Use multi-platform scraping with AI-extracted keywords
+    const multiScraper = new MultiPlatformScraper();
+    
+    let scrapingResults;
+    const availablePlatforms = multiScraper.getAvailablePlatforms();
+    
+    if (availablePlatforms.length > 0) {
+      scrapingResults = await multiScraper.scrapeFromAllPlatforms(
+        query,
+        queryAnalysis.location || location || 'unknown',
+        queryAnalysis.searchKeywords,
+        10
+      );
+    } else {
+      scrapingResults = getMockScrapingResults(
+        query,
+        queryAnalysis.location || location || 'unknown',
       );
     }
 
-    // Step 2: Use provided location or extracted location
-    const targetLocation = location || analysis.location || 'unknown';
-
-    if (!targetLocation || targetLocation === 'unknown') {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Location is required for event discovery',
-          analysis,
-          message:
-            'Please specify a location (e.g., "London", "Paris", "New York")',
-        },
-        { status: 200 },
-      );
-    }
-
-    // Step 3: Use provided platforms or suggested platforms
-    const targetPlatforms = platforms || analysis.suggestedPlatforms;
-
-    console.log(
-      `Scraping events for "${query}" in ${targetLocation} using platforms: ${targetPlatforms.join(', ')}`,
+    // Combine all events from all platforms
+    const allEvents = scrapingResults.flatMap(result => 
+      result.success ? result.events : []
     );
 
-    // Step 4: Use AI pipeline to analyze query and get mock data
-    console.log('🔍 Analyzing user query with AI...');
-    const queryAnalysis = await analyzeUserQuery(query);
+    console.log(`📊 Scraped ${allEvents.length} total events from ${scrapingResults.length} platforms`);
 
-    let scrapingResults: any[];
+    // Step 3: Enhanced AI analysis and filtering
+    const enhancedEvents = await analyzeScrapedEvents(allEvents, query, queryAnalysis);
 
-    // Be more flexible - if AI thinks it's an event search OR if user provided a location, try to find events
-    if (queryAnalysis.isEventSearch || targetLocation) {
-      console.log(
-        '🎯 Event search detected or location provided, using mock data for testing',
-      );
-      scrapingResults = getMockScrapingResults(query, targetLocation);
-      console.log(`📊 Mock scraping returned ${scrapingResults.length} platform results`);
+    // Step 4: Generate response with proper fallback
+    let aiResponse: string;
+    
+    if (enhancedEvents.length === 0) {
+      aiResponse = await generateEventResponse(query, queryAnalysis, []);
       
-      // Debug: Log what we got
-      scrapingResults.forEach((result, index) => {
-        console.log(`  Platform ${index + 1}: ${result.platform} - ${result.events.length} events`);
-        if (result.events.length > 0) {
-          console.log(`    First event: ${result.events[0].title} - ${result.events[0].sourceUrl}`);
-        }
-      });
-    } else {
-      console.log('💬 General query detected, no scraping needed');
-      scrapingResults = [];
-    }
-
-    // Step 5: Process and filter results with AI pipeline
-    const allEvents = scrapingResults
-      .filter((result) => result.success)
-      .flatMap((result) => result.events);
-
-    console.log(` Total events after filtering: ${allEvents.length}`);
-
-    // Step 5.5: Use AI to analyze and enhance scraped events
-    let enhancedEvents: any[] = [];
-    if (allEvents.length > 0) {
-      console.log('🤖 Analyzing scraped events with AI...');
-      enhancedEvents = await analyzeScrapedEvents(
-        allEvents,
-        query,
-        queryAnalysis,
-      );
-      console.log(
-        `✅ AI analysis completed: ${enhancedEvents.length} relevant events found`,
-      );
-      
-      // Debug: Log enhanced events
-      enhancedEvents.forEach((event, index) => {
-        console.log(`  Enhanced event ${index + 1}: ${event.title} - Relevance: ${event.relevance} - URL: ${event.sourceUrl}`);
-      });
-    }
-
-    if (allEvents.length === 0) {
       return NextResponse.json({
         success: true,
-        events: [],
-        analysis,
-        message: `No events found for "${query}" in ${targetLocation}. Try different keywords or check back later.`,
-        scrapingResults: scrapingResults.map((result) => ({
-          platform: result.platform,
-          success: result.success,
-          eventCount: result.events.length,
-          error: result.error,
+        message: "I couldn't find specific events on social media that match your query, but I can still help with recommendations.",
+        response: aiResponse,
+        eventsFound: 0,
+        platformsSearched: availablePlatforms.length > 0 ? availablePlatforms : ['MockData'],
+        fallbackUsed: true,
+      });
+    } else {
+      aiResponse = await generateEventResponse(query, queryAnalysis, enhancedEvents);
+      
+      return NextResponse.json({
+        success: true,
+        response: aiResponse,
+        eventsFound: enhancedEvents.length,
+        platformsSearched: availablePlatforms.length > 0 ? availablePlatforms : ['MockData'],
+        events: enhancedEvents.slice(0, 5).map(event => ({
+          title: event.title,
+          description: event.description,
+          location: event.location,
+          platform: event.platform,
+          sourceUrl: event.sourceUrl,
+          relevance: event.relevance,
         })),
+        fallbackUsed: false,
       });
     }
-
-    // Step 6: Remove duplicates and score events
-    const uniqueEvents = removeDuplicateEvents(allEvents);
-    const scoredEvents = scoreAndRankEvents(
-      uniqueEvents,
-      query,
-      targetLocation,
-      analysis.eventType || undefined,
-    );
-
-    // Step 7: Apply student-friendliness filtering
-    const studentFriendlyEvents = scoredEvents.filter(
-      (event) => event.studentFriendlinessScore > 0.4,
-    );
-
-    // Step 8: Limit results and format response
-    const finalEvents = (
-      studentFriendlyEvents.length > 0 ? studentFriendlyEvents : scoredEvents
-    ).slice(0, maxResults);
-
-    console.log(
-      `Found ${finalEvents.length} events for "${query}" in ${targetLocation}`,
-    );
-
-    // Step 9: Generate AI-powered response
-    console.log('🧠 Generating AI response...');
-    const aiResponse = await generateEventResponse(
-      query,
-      queryAnalysis,
-      enhancedEvents,
-    );
-
-    return NextResponse.json({
-      success: true,
-      events: finalEvents,
-      enhancedEvents: enhancedEvents,
-      aiResponse: aiResponse,
-      analysis: queryAnalysis,
-      totalEventsFound: uniqueEvents.length,
-      studentFriendlyCount: studentFriendlyEvents.length,
-      query,
-      location: targetLocation,
-      platforms: targetPlatforms,
-      message: `Found ${finalEvents.length} events for "${query}" in ${targetLocation}`,
-      scrapingResults: scrapingResults.map((result) => ({
-        platform: result.platform,
-        success: result.success,
-        eventCount: result.events.length,
-        error: result.error,
-      })),
-    });
   } catch (error) {
     console.error('Event discovery error:', error);
     return NextResponse.json(

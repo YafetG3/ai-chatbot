@@ -1,4 +1,6 @@
 import { openai } from '@ai-sdk/openai';
+import { generateText, generateObject } from 'ai';
+import { z } from 'zod';
 import { RawEvent } from '../services/apify';
 
 export interface FilteredEvent {
@@ -25,51 +27,44 @@ export async function filterEventsByRelevance(
   if (events.length === 0) return [];
 
   try {
-    const response = await openai('gpt-4o').generate({
-      messages: [
-        {
-          role: 'system',
-          content: `You are an expert at filtering and ranking events for international students studying abroad. 
-          
-          Analyze each event and score it based on:
-          1. Relevance to the user's query (0-10)
-          2. Student-friendliness (0-10)
-          3. Event type categorization
-          4. Overall confidence in the event details
-          
-          Return a JSON array with filtered and scored events. Only include events with relevance score > 6.
-          
-          Consider:
-          - Does this match what the user is looking for?
-          - Is this suitable for students (budget, safety, accessibility)?
-          - Is this actually an event or just a general post?
-          - Are the details clear and trustworthy?
-          
-          Format each event as:
-          {
-            "id": "original_id",
-            "title": "cleaned_title",
-            "description": "cleaned_description", 
-            "location": "extracted_location",
-            "dateTime": "extracted_datetime_or_null",
-            "platform": "original_platform",
-            "sourceUrl": "original_url",
-            "relevanceScore": 0-10,
-            "isStudentFriendly": boolean,
-            "studentFriendlinessScore": 0-10,
-            "eventType": "social|academic|cultural|sports|nightlife|general",
-            "confidence": 0-10
-          }`,
-        },
-        {
-          role: 'user',
-          content: `User query: "${originalQuery}" in ${location}
-          
-          Events to filter:
-          ${JSON.stringify(events, null, 2)}`,
-        },
-      ],
-      maxTokens: 2000,
+    const response = await generateText({
+      model: openai('gpt-4o'),
+      prompt: `You are an expert at filtering and ranking events for international students studying abroad. 
+
+Analyze each event and score it based on:
+1. Relevance to the user's query (0-10)
+2. Student-friendliness (0-10)
+3. Event type categorization
+4. Overall confidence in the event details
+
+Return a JSON array with filtered and scored events. Only include events with relevance score > 6.
+
+Consider:
+- Does this match what the user is looking for?
+- Is this suitable for students (budget, safety, accessibility)?
+- Is this actually an event or just a general post?
+- Are the details clear and trustworthy?
+
+Format each event as:
+{
+  "id": "original_id",
+  "title": "cleaned_title",
+  "description": "cleaned_description", 
+  "location": "extracted_location",
+  "dateTime": "extracted_datetime_or_null",
+  "platform": "original_platform",
+  "sourceUrl": "original_url",
+  "relevanceScore": 0-10,
+  "isStudentFriendly": boolean,
+  "studentFriendlinessScore": 0-10,
+  "eventType": "social|academic|cultural|sports|nightlife|general",
+  "confidence": 0-10
+}
+
+User query: "${originalQuery}" in ${location}
+
+Events to filter:
+${JSON.stringify(events, null, 2)}`,
       temperature: 0.1,
     });
 
@@ -127,14 +122,14 @@ function fallbackEventFiltering(
     })
     .map((event) => ({
       id: event.id,
-      title: event.title,
-      description: event.description,
+      title: event.title || 'Event',
+      description: event.description || 'Event description',
       location: event.location || location,
       dateTime: event.dateTime,
       platform: event.platform,
       sourceUrl: event.sourceUrl,
-      relevanceScore: 7, // Default score
-      isStudentFriendly: true, // Assume student-friendly
+      relevanceScore: 7,
+      isStudentFriendly: true,
       studentFriendlinessScore: 7,
       eventType: 'general',
       confidence: 6,
@@ -147,31 +142,24 @@ export async function scoreEventStudentFriendliness(
   event: RawEvent,
 ): Promise<number> {
   try {
-    const response = await openai('gpt-4o-mini').generate({
-      messages: [
-        {
-          role: 'system',
-          content: `Score this event from 0-10 on how suitable it is for international students studying abroad.
-          
-          Consider:
-          - Budget-friendliness (affordable for students)
-          - Safety and accessibility
-          - Language barriers
-          - Cultural appropriateness
-          - Student community presence
-          - Transportation accessibility
-          
-          Return only the score (0-10).`,
-        },
-        {
-          role: 'user',
-          content: `Event: ${event.title}
-          Description: ${event.description}
-          Location: ${event.location}
-          Platform: ${event.platform}`,
-        },
-      ],
-      maxTokens: 10,
+    const response = await generateText({
+      model: openai('gpt-4o-mini'),
+      prompt: `Score this event from 0-10 on how suitable it is for international students studying abroad.
+
+Consider:
+- Budget-friendliness (affordable for students)
+- Safety and accessibility
+- Language barriers
+- Cultural appropriateness
+- Student community presence
+- Transportation accessibility
+
+Return only the score (0-10).
+
+Event: ${event.title}
+Description: ${event.description}
+Location: ${event.location}
+Platform: ${event.platform}`,
       temperature: 0.1,
     });
 
@@ -208,28 +196,21 @@ export async function generateEventSummary(
   }
 
   try {
-    const response = await openai('gpt-4o').generate({
-      messages: [
-        {
-          role: 'system',
-          content: `You are a helpful assistant for international students studying abroad. 
-          
-          Create a natural, conversational summary of the events found. 
-          - Be enthusiastic and helpful
-          - Mention the variety of options found
-          - Highlight student-friendly aspects
-          - Keep it under 150 words
-          - Make it sound like a friend giving recommendations`,
-        },
-        {
-          role: 'user',
-          content: `User asked: "${query}" in ${location}
-          
-          Found these events:
-          ${events.map((e) => `- ${e.title} (${e.platform}): ${e.description}`).join('\n')}`,
-        },
-      ],
-      maxTokens: 200,
+    const response = await generateText({
+      model: openai('gpt-4o'),
+      prompt: `You are a helpful assistant for international students studying abroad. 
+
+Create a natural, conversational summary of the events found. 
+- Be enthusiastic and helpful
+- Mention the variety of options found
+- Highlight student-friendly aspects
+- Keep it under 150 words
+- Make it sound like a friend giving recommendations
+
+User asked: "${query}" in ${location}
+
+Found these events:
+${events.map((e) => `- ${e.title} (${e.platform}): ${e.description}`).join('\n')}`,
       temperature: 0.7,
     });
 
