@@ -93,7 +93,7 @@ export class RedditScraperService {
     
     const studentVariations = [
       'student',
-      'students',
+      'students', 
       'study abroad',
       'international student',
       'university',
@@ -102,7 +102,7 @@ export class RedditScraperService {
     
     const relevantSubreddits = [
       'r/studyabroad',
-      'r/solotravel',
+      'r/solotravel', 
       'r/travel',
       'r/college',
       'r/university'
@@ -131,10 +131,9 @@ export class RedditScraperService {
     });
     
     const uniqueTerms = [...new Set(searchTerms)];
-    
     console.log(`🔍 Generated ${uniqueTerms.length} Reddit search terms:`, uniqueTerms.slice(0, 5));
     
-    return uniqueTerms.slice(0, 10);
+    return uniqueTerms.slice(0, 10); // Increase limit for more comprehensive search
   }
 
   /**
