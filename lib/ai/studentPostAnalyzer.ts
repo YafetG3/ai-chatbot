@@ -48,6 +48,12 @@ Evaluate based on these criteria:
 5. Student community: Likely to have other students present
 6. Transportation: Accessible by public transport or walking
 
+**Special consideration for Reddit content:**
+- Reddit posts with high upvotes/comments indicate community trust
+- Look for authentic user experiences and recommendations
+- Posts asking for student advice or sharing student experiences are highly relevant
+- Comments providing specific recommendations are valuable
+
 Scoring:
 - isStudentRelevant: true if this would be useful/relevant for students
 - studentFriendlinessScore: 0-10 overall suitability for students

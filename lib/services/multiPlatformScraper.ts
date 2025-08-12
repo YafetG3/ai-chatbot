@@ -1,4 +1,5 @@
 import { ApifyService, RawEvent, ScrapingResult } from './apify';
+import { RedditScraperService } from './redditScraper';
 
 export interface ScrapingPlatform {
   name: string;
@@ -92,6 +93,25 @@ export class MultiPlatformScraper {
 
   constructor() {
     if (process.env.APIFY_API_TOKEN) {
+      const redditService = new RedditScraperService({
+        apiToken: process.env.APIFY_API_TOKEN,
+        timeout: parseInt(process.env.APIFY_TIMEOUT || '300000'),
+        rateLimitDelay: 1000,
+        maxItems: 20,
+        maxPostCount: 15,
+        maxComments: 10,
+        includeNSFW: false,
+      });
+      
+      this.platforms.push({
+        name: 'Reddit',
+        scrapeEvents: (query: string, location: string, keywords: string[]) => 
+          redditService.scrapeRedditEvents(query, location, keywords),
+        isAvailable: () => redditService.isAvailable(),
+      });
+    }
+
+    if (process.env.APIFY_API_TOKEN) {
       const apifyService = new ApifyService({
         apiToken: process.env.APIFY_API_TOKEN,
         timeout: parseInt(process.env.APIFY_TIMEOUT || '300000'),
@@ -99,7 +119,7 @@ export class MultiPlatformScraper {
       });
       
       this.platforms.push({
-        name: 'Apify',
+        name: 'Instagram',
         scrapeEvents: (query: string, location: string, keywords: string[]) => 
           apifyService.scrapeInstagramEvents(query, location),
         isAvailable: () => !!process.env.APIFY_API_TOKEN && process.env.APIFY_API_TOKEN !== 'mock-apify-token',

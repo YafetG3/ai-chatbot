@@ -389,11 +389,11 @@ export async function GET(request: NextRequest) {
         'relevance ranking',
       ],
       supportedPlatforms: [
+        'reddit',
         'instagram',
-        'twitter',
-        'tiktok',
-        'facebook',
-        'linkedin',
+        'bright-data',
+        'scrapfly',
+        'scraperapi',
       ],
       exampleQueries: [
         'best bars for students studying abroad in london',
