@@ -576,7 +576,7 @@ export function getMockScrapingResults(
 /**
  * Add more mock posts to the dataset
  */
-export function addMockPosts(newPosts: MockPost[]): void {
+export function addMockPosts(newPosts: any[]): void {
   MOCK_POSTS.push(...newPosts);
 }
 
@@ -585,4 +585,4 @@ export function addMockPosts(newPosts: MockPost[]): void {
  */
 export function getAllMockPosts(): MockPost[] {
   return [...MOCK_POSTS];
-} 
+}  

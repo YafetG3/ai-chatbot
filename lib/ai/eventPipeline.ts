@@ -119,7 +119,7 @@ export async function analyzeScrapedEvents(
   const enhancedEvents: EnhancedEvent[] = posts.map((post, index) => ({
     id: post.id,
     title: post.title || `Post ${index + 1}`,
-    description: post.description,
+    description: post.description || 'Event description',
     location: post.location || 'Unknown',
     platform: post.platform,
     sourceUrl: post.sourceUrl,
@@ -128,7 +128,7 @@ export async function analyzeScrapedEvents(
     targetAudience: ['students', 'exchange students'],
     eventDate: post.dateTime || null,
     price: null,
-    dataQuality: 'high',
+    dataQuality: 'high' as const,
     verificationNotes: 'Mock data for testing',
     originalData: post,
   }));
