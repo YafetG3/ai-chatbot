@@ -2,6 +2,7 @@ import { openai } from '@ai-sdk/openai';
 import { generateObject, generateText } from 'ai';
 import { z } from 'zod';
 import type { RawEvent } from '@/lib/services/apify';
+import { analyzeStudentPostRelevance } from './studentPostAnalyzer';
 
 // Analysis schema for user queries
 const QueryAnalysisSchema = z.object({
@@ -114,44 +115,30 @@ export async function analyzeScrapedEvents(
 ): Promise<EnhancedEvent[]> {
   console.log(`🔍 Analyzing ${posts.length} scraped posts for relevance...`);
   
-  // TEMPORARY: Skip AI analysis and create enhanced events directly
-  // This will help us debug if the issue is with the AI analysis
-  const enhancedEvents: EnhancedEvent[] = posts.map((post, index) => ({
-    id: post.id,
-    title: post.title || `Post ${index + 1}`,
-    description: post.description || 'Event description',
-    location: post.location || 'Unknown',
-    platform: post.platform,
-    sourceUrl: post.sourceUrl,
-    relevance: 0.9, // High relevance to ensure inclusion
-    eventType: ['social', 'student'],
-    targetAudience: ['students', 'exchange students'],
-    eventDate: post.dateTime || null,
-    price: null,
-    dataQuality: 'high' as const,
-    verificationNotes: 'Mock data for testing',
-    originalData: post,
-  }));
-
-  console.log(`✅ Created ${enhancedEvents.length} enhanced events (bypassing AI analysis)`);
-  return enhancedEvents;
-
-  // ORIGINAL CODE (commented out for debugging):
-  /*
   const enhancedEvents: EnhancedEvent[] = [];
+  const relevanceThreshold = 0.7;
 
   for (const post of posts) {
     try {
+      const studentAnalysis = await analyzeStudentPostRelevance(post, userQuery);
+      
+      if (!studentAnalysis.isStudentRelevant || studentAnalysis.studentFriendlinessScore < 6) {
+        console.log(`⏭️ Skipping post ${post.id}: Not student-relevant (score: ${studentAnalysis.studentFriendlinessScore})`);
+        continue;
+      }
+
       const analysis = await generateObject({
         model: openai('gpt-4o-mini'),
-        prompt: `Analyze this social media post and determine if it's a relevant student event:
+        prompt: `Analyze this social media post for relevance to the user's query:
 
-POST CONTENT: "${post.description}"
+POST: "${post.description}"
 LOCATION: "${post.location}"
-SOURCE: ${post.platform}
 USER QUERY: "${userQuery}"
 
-Analyze and return ONLY valid JSON:
+Rate relevance 0.0-1.0 based on how well this post matches what the user is looking for.
+Be strict - only high relevance (0.7+) should be included.
+
+Return JSON with:
 {
   "isStudentEvent": boolean,
   "title": string,
@@ -163,20 +150,13 @@ Analyze and return ONLY valid JSON:
   "price": string | null,
   "dataQuality": "high" | "medium" | "low",
   "verificationNotes": string
-}
-
-Rules:
-- isStudentEvent: true if relevant to students/study abroad
-- relevance: 0.0-1.0 based on match with user query
-- dataQuality: assess completeness of information
-- verificationNotes: any concerns or verification needed`,
+}`,
         schema: EventAnalysisSchema,
       });
 
       const eventAnalysis = analysis.object;
 
-      // Only include events with decent relevance
-      if (eventAnalysis.relevance >= 0.7) {
+      if (eventAnalysis.relevance >= relevanceThreshold) {
         enhancedEvents.push({
           id: post.id,
           title: eventAnalysis.title,
@@ -190,9 +170,11 @@ Rules:
           eventDate: eventAnalysis.eventDate,
           price: eventAnalysis.price,
           dataQuality: eventAnalysis.dataQuality,
-          verificationNotes: eventAnalysis.verificationNotes,
+          verificationNotes: `${eventAnalysis.verificationNotes} | Student score: ${studentAnalysis.studentFriendlinessScore}/10`,
           originalData: post,
         });
+      } else {
+        console.log(`⏭️ Skipping post ${post.id}: Low relevance (${eventAnalysis.relevance})`);
       }
     } catch (error) {
       console.error(`Failed to analyze post ${post.id}:`, error);
@@ -200,9 +182,9 @@ Rules:
     }
   }
 
-  // Sort by relevance score (highest first)
+  console.log(`✅ Found ${enhancedEvents.length} highly relevant events`);
+  
   return enhancedEvents.sort((a, b) => b.relevance - a.relevance);
-  */
 }
 
 /**
