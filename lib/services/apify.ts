@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ApifyClient } from 'apify-client';
 
 // Types for Apify integration
 export interface RawEvent {
@@ -40,10 +41,11 @@ const TIKTOK_ACTOR_ID = 'apify/tiktok-scraper';
 
 export class ApifyService {
   private config: ApifyConfig;
-  private baseUrl = 'https://api.apify.com/v2';
+  private apifyClient: ApifyClient;
 
   constructor(config: ApifyConfig) {
     this.config = config;
+    this.apifyClient = new ApifyClient({ token: config.apiToken });
   }
 
   /**
@@ -172,29 +174,16 @@ export class ApifyService {
     platform: string,
   ): Promise<ScrapingResult> {
     try {
-      // Start the actor run
-    const runResponse = await fetch(
-        `${this.baseUrl}/acts/${actorId}/runs?token=${this.config.apiToken}`,
-      {
-        method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        body: JSON.stringify(runInput),
-      },
-    );
+      console.log(`🚀 Starting actor ${actorId} for platform ${platform}`);
+      
+      const run = await this.apifyClient
+        .actor(actorId)
+        .start(runInput);
 
-    if (!runResponse.ok) {
-        throw new Error(
-          `Failed to start Apify actor: ${runResponse.statusText}`,
-        );
-      }
-
-      const runData = await runResponse.json();
-      const runId = runData.data.id;
+      console.log(`Started actor ${actorId} with run ID: ${run.id}`);
 
       // Wait for the run to complete
-      const events = await this.waitForRunCompletion(runId, platform);
+      const events = await this.waitForRunCompletion(run.id, platform);
 
       return {
         success: true,
@@ -204,63 +193,62 @@ export class ApifyService {
         location: runInput.location || 'unknown',
         scrapedAt: new Date(),
       };
-  } catch (error) {
+    } catch (error) {
       console.error(`Error running Apify actor ${actorId}:`, error);
-    throw error;
+      throw error;
+    }
   }
-}
 
   /**
    * Wait for Apify run to complete and fetch results
    */
   private async waitForRunCompletion(
-  runId: string,
+    runId: string,
     platform: string,
   ): Promise<RawEvent[]> {
     const maxWaitTime = this.config.timeout;
-  const startTime = Date.now();
+    const startTime = Date.now();
     const checkInterval = 5000; // Check every 5 seconds
 
+    console.log(`⏳ Waiting for ${platform} run ${runId} to complete...`);
+
     while (Date.now() - startTime < maxWaitTime) {
-    const statusResponse = await fetch(
-        `${this.baseUrl}/acts/runs/${runId}?token=${this.config.apiToken}`,
-      );
-
-      if (!statusResponse.ok) {
-        throw new Error(
-          `Failed to check run status: ${statusResponse.statusText}`,
-        );
-      }
-
-      const statusData = await statusResponse.json();
-
-      if (statusData.data.status === 'SUCCEEDED') {
-        // Fetch results
-        const resultsResponse = await fetch(
-          `${this.baseUrl}/acts/runs/${runId}/dataset/items?token=${this.config.apiToken}`,
-        );
-
-        if (!resultsResponse.ok) {
-          throw new Error(
-            `Failed to fetch results: ${resultsResponse.statusText}`,
-          );
+      try {
+        const run = await this.apifyClient.run(runId).get();
+        
+        if (!run) {
+          throw new Error('Failed to get run information from Apify');
         }
 
-        const rawResults = await resultsResponse.json();
-        return this.processRawResults(rawResults, platform);
+        console.log(`📊 ${platform} run status: ${run.status}`);
+
+        if (run.status === 'SUCCEEDED') {
+          console.log(`✅ ${platform} run completed successfully, fetching results...`);
+          
+          const { items } = await this.apifyClient.run(runId).dataset().listItems();
+          console.log(`📥 Retrieved ${items.length} raw ${platform} results`);
+          
+          return this.processRawResults(items, platform);
+        }
+
+        if (run.status === 'FAILED') {
+          const errorMessage = run.statusMessage || 'Unknown error';
+          throw new Error(`${platform} run failed: ${errorMessage}`);
+        }
+
+        if (run.status === 'ABORTED') {
+          throw new Error(`${platform} run was aborted`);
+        }
+
+        // Wait before checking again
+        await this.delay(checkInterval);
+      } catch (error) {
+        console.error(`❌ Error checking ${platform} run status:`, error);
+        throw error;
       }
-
-      if (statusData.data.status === 'FAILED') {
-        throw new Error(
-          `Apify run failed: ${statusData.data.meta?.errorMessage || 'Unknown error'}`,
-        );
     }
 
-    // Wait before checking again
-      await this.delay(checkInterval);
-    }
-
-    throw new Error('Apify run timed out');
+    throw new Error(`${platform} run timed out`);
   }
 
   /**

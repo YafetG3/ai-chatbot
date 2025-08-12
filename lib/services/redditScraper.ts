@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ApifyClient } from 'apify-client';
 import { RawEvent, ScrapingResult, ApifyConfig } from './apify';
 
 const REDDIT_SCRAPER_LITE_ACTOR_ID = 'trudax/reddit-scraper-lite';
@@ -12,10 +13,11 @@ export interface RedditScrapingConfig extends ApifyConfig {
 
 export class RedditScraperService {
   private config: RedditScrapingConfig;
-  private baseUrl = 'https://api.apify.com/v2';
+  private apifyClient: ApifyClient;
 
   constructor(config: RedditScrapingConfig) {
     this.config = config;
+    this.apifyClient = new ApifyClient({ token: config.apiToken });
   }
 
   /**
@@ -141,30 +143,16 @@ export class RedditScraperService {
    */
   private async runRedditActor(runInput: any): Promise<RawEvent[]> {
     try {
-      const runResponse = await fetch(
-        `${this.baseUrl}/acts/${REDDIT_SCRAPER_LITE_ACTOR_ID}/runs?token=${this.config.apiToken}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(runInput),
-        }
-      );
+      console.log(`🚀 Starting Reddit scraper with actor ID: ${REDDIT_SCRAPER_LITE_ACTOR_ID}`);
+      
+      const run = await this.apifyClient
+        .actor(REDDIT_SCRAPER_LITE_ACTOR_ID)
+        .start(runInput);
 
-      if (!runResponse.ok) {
-        throw new Error(
-          `Failed to start Reddit scraper: ${runResponse.statusText}`
-        );
-      }
+      console.log(`🚀 Reddit scraper started with run ID: ${run.id}`);
 
-      const runData = await runResponse.json();
-      const runId = runData.data.id;
-
-      console.log(`🚀 Reddit scraper started with run ID: ${runId}`);
-
-      // Wait for the run to complete
-      const events = await this.waitForRedditRunCompletion(runId);
+      // Wait for the run to complete and get results
+      const events = await this.waitForRedditRunCompletion(run.id);
 
       return events;
     } catch (error) {
@@ -184,46 +172,41 @@ export class RedditScraperService {
     console.log(`⏳ Waiting for Reddit scraper to complete (max ${maxWaitTime/1000}s)...`);
 
     while (Date.now() - startTime < maxWaitTime) {
-      const statusResponse = await fetch(
-        `${this.baseUrl}/acts/runs/${runId}?token=${this.config.apiToken}`
-      );
+      try {
+        const run = await this.apifyClient.run(runId).get();
+        
+        if (!run) {
+          throw new Error('Failed to get run information from Apify');
+        }
+        
+        const status = run.status;
 
-      if (!statusResponse.ok) {
-        throw new Error(
-          `Failed to check Reddit run status: ${statusResponse.statusText}`
-        );
-      }
+        console.log(`📊 Reddit scraper status: ${status}`);
 
-      const statusData = await statusResponse.json();
-      const status = statusData.data.status;
-
-      console.log(`📊 Reddit scraper status: ${status}`);
-
-      if (status === 'SUCCEEDED') {
-        const resultsResponse = await fetch(
-          `${this.baseUrl}/acts/runs/${runId}/dataset/items?token=${this.config.apiToken}`
-        );
-
-        if (!resultsResponse.ok) {
-          throw new Error(
-            `Failed to fetch Reddit results: ${resultsResponse.statusText}`
-          );
+        if (status === 'SUCCEEDED') {
+          console.log(`✅ Reddit scraper completed successfully, fetching results...`);
+          
+          const { items } = await this.apifyClient.run(runId).dataset().listItems();
+          console.log(`📥 Retrieved ${items.length} raw Reddit results`);
+          
+          return this.processRedditResults(items);
         }
 
-        const rawResults = await resultsResponse.json();
-        console.log(`📥 Retrieved ${rawResults.length} raw Reddit results`);
-        
-        return this.processRedditResults(rawResults);
-      }
+        if (status === 'FAILED') {
+          const errorMessage = run.statusMessage || 'Unknown error';
+          throw new Error(`Reddit scraper run failed: ${errorMessage}`);
+        }
 
-      if (status === 'FAILED') {
-        throw new Error(
-          `Reddit scraper run failed: ${statusData.data.meta?.errorMessage || 'Unknown error'}`
-        );
-      }
+        if (status === 'ABORTED') {
+          throw new Error('Reddit scraper run was aborted');
+        }
 
-      // Wait before checking again
-      await this.delay(checkInterval);
+        // Wait before checking again for running/ready states
+        await this.delay(checkInterval);
+      } catch (error) {
+        console.error(`❌ Error checking Reddit run status:`, error);
+        throw error;
+      }
     }
 
     throw new Error('Reddit scraper run timed out');
