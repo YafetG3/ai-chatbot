@@ -9,6 +9,8 @@ import {
   primaryKey,
   foreignKey,
   boolean,
+  real,
+  integer,
 } from 'drizzle-orm/pg-core';
 
 export const user = pgTable('User', {
@@ -168,3 +170,61 @@ export const stream = pgTable(
 );
 
 export type Stream = InferSelectModel<typeof stream>;
+
+// New Event Discovery Tables
+export const events = pgTable('events', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  title: text('title').notNull(),
+  description: text('description'),
+  location: text('location'),
+  dateTime: timestamp('date_time'),
+  platform: varchar('platform', { length: 50 }), // instagram, twitter, tiktok, etc.
+  sourceUrl: text('source_url'),
+  relevanceScore: real('relevance_score'),
+  isStudentFriendly: boolean('is_student_friendly').default(false),
+  scrapedAt: timestamp('scraped_at').defaultNow(),
+  chatId: uuid('chat_id').references(() => chat.id),
+  createdAt: timestamp('created_at').defaultNow(),
+  rawData: json('raw_data'), // Store original scraped data
+  eventType: varchar('event_type', { length: 50 }), // social, academic, cultural, sports, nightlife
+  keywords: json('keywords'), // Array of relevant keywords
+  imageUrl: text('image_url'), // Event image if available
+  organizer: text('organizer'), // Event organizer/host
+  price: text('price'), // Event cost information
+  ageRestriction: text('age_restriction'), // Age requirements
+  tags: json('tags'), // Array of event tags
+});
+
+export type Event = InferSelectModel<typeof events>;
+
+export const eventQueries = pgTable('event_queries', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  query: text('query').notNull(),
+  location: text('location'),
+  userId: uuid('user_id').references(() => user.id),
+  chatId: uuid('chat_id').references(() => chat.id),
+  resultsFound: integer('results_found').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  eventType: varchar('event_type', { length: 50 }),
+  keywords: json('keywords'),
+  processingStatus: varchar('processing_status', { length: 50 }).default(
+    'pending',
+  ), // pending, processing, completed, failed
+  errorMessage: text('error_message'),
+  scrapedAt: timestamp('scraped_at'),
+  processingTime: integer('processing_time'), // in milliseconds
+});
+
+export type EventQuery = InferSelectModel<typeof eventQueries>;
+
+export const eventPlatforms = pgTable('event_platforms', {
+  id: uuid('id').primaryKey().notNull().defaultRandom(),
+  name: varchar('name', { length: 100 }).notNull(), // instagram, twitter, tiktok, facebook
+  isActive: boolean('is_active').default(true),
+  lastScraped: timestamp('last_scraped'),
+  rateLimitRemaining: integer('rate_limit_remaining'),
+  rateLimitReset: timestamp('rate_limit_reset'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export type EventPlatform = InferSelectModel<typeof eventPlatforms>;

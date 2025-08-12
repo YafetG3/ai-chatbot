@@ -40,26 +40,14 @@ import type { VisibilityType } from '@/components/visibility-selector';
 
 export const maxDuration = 60;
 
-let globalStreamContext: ResumableStreamContext | null = null;
+// Resumable streams disabled to avoid Redis issues
 
 export function getStreamContext() {
-  if (!globalStreamContext) {
-    try {
-      globalStreamContext = createResumableStreamContext({
-        waitUntil: after,
-      });
-    } catch (error: any) {
-      if (error.message.includes('REDIS_URL')) {
-        console.log(
-          ' > Resumable streams are disabled due to missing REDIS_URL',
-        );
-      } else {
-        console.error(error);
-      }
-    }
-  }
-
-  return globalStreamContext;
+  // Completely disable resumable streams for now to avoid Redis issues
+  console.log(
+    ' > Resumable streams are disabled to avoid Redis connection issues',
+  );
+  return null;
 }
 
 export async function POST(request: Request) {
